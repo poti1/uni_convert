@@ -4,28 +4,18 @@ use v5.32;
 use strict;
 use warnings;
 use utf8;
-use charnames     qw/ :full /;
+use charnames        qw/ :full /;
+use List::Util       qw/ max /;
 use Getopt::Long;
-use List::Util    qw/ max /;
-
-
-#-----------------------------------------------------------------------
-#                              COLORS
-#-----------------------------------------------------------------------
-
-my $RED     = "\e[31m";
-my $YELLOW  = "\e[33m";
-my $TEAL    = "\e[35m";
-my $BG_GREY = "\e[100m";
-my $RESTORE = "\e[0m";
-
-# TODO: use Term::ANSIColor instead.
+use Term::ANSIColor;
+use subs             qw/ r /;
 
 
 #-----------------------------------------------------------------------
 #                                SUBS
 #-----------------------------------------------------------------------
 
+# Input.
 sub define_spec {
    {
       "name"         => {
@@ -102,7 +92,6 @@ sub show_help {
    my $options = build_help_options();
 
    say <<~HERE;
-
       $self [options]
 
       Options:
@@ -112,21 +101,17 @@ sub show_help {
    exit 1;
 }
 
-sub r {
-   require Data::Dumper;
-   say Data::Dumper->new([@_])
-         ->Terse(1)
-         ->Indent(1)
-         ->Sortkeys(1)
-         ->Dump;
-}
-
 sub get_options {
    my $opts = {};
 
    GetOptions($opts, build_spec_names()) or die $!;
 
-   r $opts if $opts->{debug}; 
+   if ($opts->{debug} ){
+      r  {
+            opts => $opts,
+            ARGV => \@ARGV,
+      };
+   }
 
    list_options() if $opts->{list_options};
 
@@ -141,9 +126,28 @@ sub get_options {
 }
 
 sub get_input {
+   my $have_empty_input = grep { $_ eq "" } @ARGV;
+
+   bad_input("") if $have_empty_input;
+
    @ARGV;
 }
 
+
+# Error reporting.
+sub bad_input {
+   _bad_x("input", @_);
+}
+sub bad_name {
+   _bad_x("name", @_);
+}
+sub _bad_x {
+   my ($what,$arg) = @_;
+   die colored("Invalid $what: ", "YELLOW") . colored("'$arg'", "RED") . "\n\n";
+}
+
+
+# Unicode conversions.
 sub get_name {
    my ($opts,$in) = @_;
 
@@ -154,8 +158,8 @@ sub get_name {
       else{ show_help() }
    };
 
-   unless ( defined $name ) {
-      die "${YELLOW}Name cannot be determined from: $RED$in$RESTORE\n\n";
+   if ( not defined $name ) {
+      die colored("Name cannot be determined from: ", "YELLOW") . colored($in, "RED") . "\n\n";
    }
 
    $name;
@@ -163,7 +167,7 @@ sub get_name {
 
 sub name_2_line {
    my ($name) = @_;
-   my $string  = name2string($name) // die "${YELLOW}Invalid name: $RED$name$RESTORE\n\n";
+   my $string  = name2string($name) // bad_name($name);
    my $uni     = name2uni($name);
    my $hex     = name2hex($name);
    my $dec     = name2dec($name);
@@ -180,6 +184,30 @@ sub name_2_line {
    ];
 }
 
+sub string2name{ charnames::viacode ord shift }          # ❄                      -> SNOWFLAKE
+sub code2name  { charnames::viacode( shift )  }          # U+2744, 0x2744, 10052  -> SNOWFLAKE
+sub name2string{ charnames::string_vianame( shift ) }    # SNOWFLAKE              -> ❄
+sub name2uni   { sprintf "U+%x", name2dec( shift )  }    # SNOWFLAKE              -> U+2744
+sub name2hex   { sprintf "%#x",  name2dec( shift )  }    # SNOWFLAKE              -> 0x2744
+sub name2dec   { charnames::vianame( shift ) }           # SNOWFLAKE              -> 10052
+
+
+# Render.
+sub render_lines {
+   my $max    = get_max_length(@_);
+   my $format = sprintf define_raw_format(), @$max;
+
+   for ( @_ ) {
+      printf $format, @$_;
+   }
+}
+
+sub define_raw_format {
+   colored("%%%ss",               "RED")             . " " .
+   colored("%%-%ss",              "YELLOW")          . " " .
+   colored("%%-%ss %%-%ss %%%ss", "ON_BRIGHT_BLACK") . "\n";
+}
+
 sub get_max_length {
    my $last_row    = $#_;
    my $last_column = $_[0]->$#*;
@@ -194,42 +222,33 @@ sub get_max_length {
    \@max;
 }
 
-sub define_raw_format {
-   "$RED%%%ss $YELLOW%%-%ss$RESTORE $BG_GREY%%-%ss %%-%ss %%%ss$RESTORE\n";
+
+# Debug.
+sub r {
+   require Data::Dumper;
+   say Data::Dumper->new([@_])
+         ->Terse(1)
+         ->Indent(1)
+         ->Sortkeys(1)
+         ->Dump;
 }
 
-sub render_lines {
-   my $max    = get_max_length(@_);
-   my $format = sprintf define_raw_format(), @$max;
-
-   for ( @_ ) {
-      printf $format, @$_;
-   }
-}
-
-sub string2name{ charnames::viacode ord shift }          # ❄                      -> SNOWFLAKE
-sub code2name  { charnames::viacode( shift )  }          # U+2744, 0x2744, 10052  -> SNOWFLAKE
-sub name2string{ charnames::string_vianame( shift ) }    # SNOWFLAKE              -> ❄
-sub name2uni   { sprintf "U+%x", name2dec( shift )  }    # SNOWFLAKE              -> U+2744
-sub name2hex   { sprintf "%#x",  name2dec( shift )  }    # SNOWFLAKE              -> 0x2744
-sub name2dec   { charnames::vianame( shift ) }           # SNOWFLAKE              -> 10052
-               
 
 #-----------------------------------------------------------------------
 #                                MAIN
 #-----------------------------------------------------------------------
 
+say "";
 my $opts    = get_options();
 my ($input) = get_input();
-my @process = $opts->{string} ? (split //, $input//"") : ($input);
+my @process = $opts->{string} ? (split //, $input) : ($input);
 my @lines;
 
-say "";
 for ( @process ) {
    my $name = get_name($opts,$_);   # Normalize to a name.
    push @lines, name_2_line($name); # Build other parts.
 }
-render_lines @lines;                # Format and render.
+render_lines @lines if @lines;      # Format and render.
 say "";
 
 #-----------------------------------------------------------------------
