@@ -58,8 +58,7 @@ sub list_options {
       s/ (?=^\w$)     /-/x;    # Short options.
       $_;
      }
-     map { split /\|/, $_ }
-     keys define_spec()->%*;
+     map { split /\|/, $_ } build_spec_names();
 
    exit 1;
 }
