@@ -81,10 +81,7 @@ sub build_help_options {
 }
 
 sub show_help {
-
-   my $YELLOW  = "\e[33m";
-   my $RESTORE = "\e[0m";
-   my $self    = "${YELLOW}uni_convert$RESTORE";
+   my $self    = colored( "uni_convert", "YELLOW" );
    my $options = build_help_options();
 
    say <<~HERE;
